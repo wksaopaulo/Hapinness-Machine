@@ -1,9 +1,10 @@
 #include "happinessApp.h"
+#include "Poco/Glob.h"
 
 #define CAM_WIDTH 320
 #define CAM_HEIGHT 240
 
-#define FRAMERATE 60
+#define FRAMERATE 30
 #define SERVO_PIN 9
 
 #define SERVO_INITIAL_ANGLE 10
@@ -51,44 +52,35 @@ void happinessApp::setup(){
     /*********
      Hardware communication
      ********/
-    arduinoReady = false;
-    ofAddListener(arduino.EInitialized, this, &happinessApp::arduinoSetUp);
-    arduino.connect("/dev/tty.usbserial-A700e0mh", 57600);
-    servoRotationTime = 0;
+    
     gui.addTitle("Servo");
     gui.addSlider("Servo closing time window", openedWindow, 0, 240);
+    gui.addSlider("opened angle", openedAngle, 0, 180);
+    gui.addSlider("closed angle", closedAngle, 0, 180);
     
+    gui.addToggle("start fullscreen", fullscreen);
     
     ///////////////////////////////////////////////////////////////////
     gui.loadFromXML();
     gui.show();
     
+    //// Initialize arduino
+    arduino.listDevices();
+    closedAngle = 18;
+    openedAngle = 180;
+    arduinoReady = false;
+    std::set<std::string> files;
+    Poco::Glob::glob("/dev/tty.usb*", files);
+    if(files.begin() != files.end() && (arduinoReady = arduino.setup(*files.begin(), 9600))){
+        arduino.writeByte(closedAngle);
+    }
+    servoRotationTime = 0;
+    
     //Reset variables
     triggeredByMovement = triggeredBySocialNet = triggeredBySound = false;
-    lastHappiness = 0;
     
-}
-//--------------------------------------------------------------
-void happinessApp::arduinoSetUp(const int & version) {
-	
+    ofSetFullscreen(fullscreen);
     
-	// remove listener because we don't need it anymore
-	ofRemoveListener(arduino.EInitialized, this, &happinessApp::arduinoSetUp);
-    
-    
-	// this is where you setup all the pins and pin modes, etc
-	//for (int i = 0; i < 13; i++){
-	//	arduino.sendDigitalPinMode(i, ARD_INPUT);
-	//}
-    arduino.sendDigitalPinMode(SERVO_PIN, ARD_SERVO);
-	arduino.sendDigitalPinMode(13, ARD_OUTPUT);
-	arduino.sendAnalogPinReporting(0, ARD_ANALOG);	// AB: report data
-	arduino.sendDigitalPinMode(11, ARD_PWM);		// on diecimelia: 11 pwm?
-    
-    //Reset servo
-    arduino.sendServo(SERVO_PIN, SERVO_INITIAL_ANGLE);
-
-	arduinoReady = true;
 }
 
 //--------------------------------------------------------------
@@ -129,7 +121,6 @@ void happinessApp::update(){
         
         //Reset counter
         happyFrames = 0;
-        lastHappiness = ofGetElapsedTimef();
     }
     
     /******
@@ -144,27 +135,29 @@ void happinessApp::update(){
         
         //Reset counter
         happyNoises = 0;
-        lastHappiness = ofGetElapsedTimef();
     }
     
     /******
      Hardware
      ******/
-    arduino.update();
     if (arduinoReady) {
-        //Are we happy?
-        if(triggeredByMovement || triggeredBySocialNet || triggeredBySound){
+        //Debug
+        while (arduino.available()) cout << "read " << arduino.readByte() << endl;
+        
+        //Are we happy and not in the middle of a door opening
+        if((servoRotationTime + openedWindow*3 < ofGetFrameNum()) && (triggeredByMovement || triggeredBySocialNet || triggeredBySound)){
             
             //reset values
             triggeredByMovement = triggeredBySocialNet = triggeredBySound = false;
             
-            arduino.sendServo(SERVO_PIN, 180);
+            arduino.writeByte(openedAngle); //open
             servoRotationTime = ofGetFrameNum();
-            cout << "sent 180" << endl;
+            cout << "sent OPEN" << endl;
+            
         }
         if (servoRotationTime + openedWindow == ofGetFrameNum()){
-            arduino.sendServo(SERVO_PIN, SERVO_INITIAL_ANGLE);
-            cout << "sent SERVO_INITIAL_ANGLE" << endl;
+            arduino.writeByte(closedAngle); //Close
+            cout << "sent CLOSE" << endl;
         }
         
     }
@@ -186,7 +179,8 @@ void happinessApp::draw(){
     if(pixelSum > movementFrameTh) ofSetColor(255, 0, 0);
     diffImage.draw(CAM_WIDTH, 0);
     //Write status
-    string movementStatus = ofToString(happyFrames) + " happy frames. Movement trigger: " + ofToString(triggeredByMovement);
+    if(happyFrames > movementMinFrames) ofSetColor(255, 0, 0);
+    string movementStatus = ofToString(happyFrames) + " happy frames.";
     ofDrawBitmapString(movementStatus, 0, CAM_HEIGHT + 10);
     ofPopStyle();
     ofPopMatrix();
@@ -206,7 +200,8 @@ void happinessApp::draw(){
     ofVertex(volHistory.size(), 0);
     ofEndShape();
     //Write status
-    string soundStatus = ofToString(happyNoises) + " happy noises. Sound trigger: " + ofToString(triggeredBySound);
+    if(happyNoises > soundVolumeTh) ofSetColor(255, 0, 0);
+    string soundStatus = ofToString(happyNoises) + " happy noises.";
     ofDrawBitmapString(soundStatus, 0, 15);
     //Draw threshold line
     ofSetColor(255, 0, 0);
@@ -215,7 +210,18 @@ void happinessApp::draw(){
     ofPopStyle();
     ofPopMatrix();
     
-    ofDrawBitmapString("Happy at " + ofToString(lastHappiness), 0, ofGetHeight()-30);
+    //Warning message
+    if (!arduinoReady) {
+        float s = 7;
+        ofPushMatrix();
+        ofPushStyle();
+        ofSetColor(255, 0, 0);
+        ofScale(s, s);
+        ofDrawBitmapString("ARDUINO NOT READY", ofPoint(0, ofGetHeight()/2/s));
+        ofPopStyle();
+        ofPopMatrix();
+        
+    }
 }
 
 
@@ -258,7 +264,9 @@ void happinessApp::audioIn(float * input, int bufferSize, int nChannels) {
 
 //--------------------------------------------------------------
 void happinessApp::keyPressed(int key){
-
+    if (key == 'f') {
+        ofToggleFullscreen();
+    }
 }
 
 //--------------------------------------------------------------

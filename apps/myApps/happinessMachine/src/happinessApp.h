@@ -10,15 +10,17 @@ class happinessApp : public ofBaseApp{
     bool triggeredByMovement;
     bool triggeredBySound;
     bool triggeredBySocialNet;
-    unsigned int lastHappiness;
     
     //Happiness maker
-    ofArduino arduino;
+    ofSerial arduino;
     bool arduinoReady;
     void arduinoSetUp(const int & version);
     //Servo state
     int servoRotationTime; //When the servo opened the door
     int openedWindow; //Number of frames the window will remain open
+    //
+    int closedAngle;
+    int openedAngle;
     
     //Configuration helper
     ofxSimpleGuiToo gui;
@@ -49,6 +51,9 @@ class happinessApp : public ofBaseApp{
     int soundMinFrames;
     //Number of happy noises in this timespan
     int happyNoises;
+    
+    //
+    bool fullscreen;
     
     public:
 		void setup();
